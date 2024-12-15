@@ -1,3 +1,5 @@
+Configs used for the project can be found under evaluation/configs/IR_project. Datasets and python code used for processing to a usable format can be found under process_data. No additional packages are needed compared to the original. For how to use the code see the original README below:
+
 ### This is a joint code repository for two papers published at 16th ACM Conference on Recommender Systems 
 (Seattle, WA, USA, 18th-23rd September 2022)
 
