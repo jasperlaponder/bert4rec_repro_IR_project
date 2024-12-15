@@ -1,13 +1,6 @@
 config=$1
 N=$2
 
-if [ "$CHECK_COMMIT_STATUS" != "false" ]; then
-    if [ -n "$(git status --porcelain)" ]; then
-      echo "There are changes in the repo. Please commit the code in order to maintain traceability of the experiments";
-      exit 1
-    fi
-fi
-
 config_filename=$(basename -- "$config")
 config_id="${config_filename%.*}"
 

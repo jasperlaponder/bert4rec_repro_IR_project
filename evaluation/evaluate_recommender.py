@@ -19,13 +19,14 @@ from aprec.evaluation.filter_cold_start import filter_cold_start
 from aprec.evaluation.metrics.sampled_proxy_metric import SampledProxy
 from aprec.evaluation.evaluation_utils import group_by_user
 
-def evaluate_recommender(recommender, test_actions,
+def evaluate_recommender(recommender, train_actions, test_actions,
                          metrics, out_dir, recommender_name,
                          features_from_test=None,
                          recommendations_limit=900,
                          evaluate_on_samples = False,
                          ):
 
+    train_actions_by_user = group_by_user(train_actions)
     test_actions_by_user = group_by_user(test_actions)
     metric_sum = defaultdict(lambda: 0.0)
     sampled_metric_sum = defaultdict(lambda: 0.0)
@@ -37,7 +38,6 @@ def evaluate_recommender(recommender, test_actions,
         else:
             requests.append((user_id, None))
 
-
     print("generating predictions...")
     all_predictions = recommender.recommend_batch(requests, recommendations_limit)
 
@@ -46,10 +46,29 @@ def evaluate_recommender(recommender, test_actions,
 
     print('calculating metrics...')
     user_docs = []
+    N_rep = 0
+    N_expl = 0
+
     for i in tqdm(range(len(all_user_ids)), ascii=True):
         user_id = all_user_ids[i]
         predictions = all_predictions[i]
+
+        # For identification of repetition and exploration
+        user_train_actions = train_actions_by_user[user_id]
+        user_train_actions_set = set(action.item_id for action in user_train_actions)
+
         user_test_actions = test_actions_by_user[user_id]
+
+        # Repetition and exploration sets
+        test_actions_repetition = [action for action in user_test_actions if action.item_id in user_train_actions_set]
+        test_actions_exploration = [action for action in user_test_actions if action.item_id not in user_train_actions_set]
+        predictions_repetition = [prediction for prediction in predictions if prediction[0] in user_train_actions_set]
+        predictions_exploration = [prediction for prediction in predictions if prediction[0] not in user_train_actions_set]
+        if len(test_actions_repetition) > 0:
+            N_rep += 1
+        if len(test_actions_exploration) > 0:
+            N_expl += 1
+        
         user_doc = {"user_id": user_id,
                     "metrics": {},
                     "test_actions": [action.to_json() for action in user_test_actions],
@@ -66,6 +85,14 @@ def evaluate_recommender(recommender, test_actions,
                 sampled_metric_sum[metric.name] += sampled_metric_value
                 user_doc["sampled_metrics"][metric.name] = sampled_metric_value
 
+            repetition_metric_value = metric(predictions_repetition, test_actions_repetition)
+            metric_sum[f"{metric.name}_repetition"] += repetition_metric_value
+            user_doc["metrics"][f"{metric.name}_repetition"] = repetition_metric_value
+
+            exploration_metric_value = metric(predictions_exploration, test_actions_exploration)            
+            metric_sum[f"{metric.name}_exploration"] += exploration_metric_value
+            user_doc["metrics"][f"{metric.name}_exploration"] = exploration_metric_value
+
         user_docs.append(user_doc)
 
     mkdir_p(f"{out_dir}/predictions/")
@@ -80,7 +107,12 @@ def evaluate_recommender(recommender, test_actions,
     result = {}
     sampled_result = {}
     for metric in metric_sum:
-        result[metric] = metric_sum[metric]/len(test_actions_by_user)
+        if metric.endswith("_repetition") and N_rep > 0:
+            result[metric] = metric_sum[metric]/N_rep
+        elif metric.endswith("_exploration") and N_expl > 0:
+            result[metric] = metric_sum[metric]/N_expl
+        else: 
+            result[metric] = metric_sum[metric]/len(all_user_ids)
         if evaluate_on_samples:
             sampled_result[metric] = sampled_metric_sum[metric]/len(test_actions_by_user)
     if evaluate_on_samples:
@@ -162,7 +194,7 @@ class RecommendersEvaluator(object):
 
                 print("calculating metrics...")
                 evaluate_time_start = time.time()
-                evaluation_result = evaluate_recommender(recommender, self.test,
+                evaluation_result = evaluate_recommender(recommender, self.train, self.test,
                                                          self.metrics, self.out_dir,
                                                          recommender_name, self.features_from_test,
                                                          recommendations_limit=self.recommendations_limit,

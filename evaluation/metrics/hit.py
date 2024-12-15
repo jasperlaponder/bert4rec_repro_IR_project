@@ -10,7 +10,7 @@ class HIT(Metric):
         self.k = k
         
     def __call__(self, recommendations, actual_actions):
-        if(len(recommendations) == 0):
+        if(len(recommendations) == 0 or len(actual_actions) == 0):
             return 0
         action_to_check = actual_actions[0] 
         for action in actual_actions[1:]:
